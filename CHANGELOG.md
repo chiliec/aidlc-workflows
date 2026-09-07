@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [2.8.2] - 2026-09-09
+
+Improve source-manifest validation performance for units with large source-claim sets while preserving the existing accept/refuse rules. **Upgrade:** `aidlc update`, or use `install.sh --version 2.8.2` / `install.ps1 -Version 2.8.2`.
+
+* **Reviewing or finalizing a unit with hundreds of source claims is no longer minutes of git spawns.** `source-manifest.json` validation ran three `git` processes per claimed path (HEAD lookup, tree membership, ignore check); it now resolves HEAD once, reads the tree once, and checks ignore rules for every claim in one batched `git check-ignore`, with identical accept/refuse results.
+
 ## [2.8.1] - 2026-09-08
 
 Fix defects found while exercising the 2.8.0 native install: the guided `aidlc config` setup cancelled itself when Enter was pressed to accept a default, `aidlc update` on an already-current install failed its integrity check under a normal shell umask, and every native GitHub Copilot and Cursor hook was dead because the 2.8.0 packager projected those adapters onto the one-argument core-hook route. **Upgrade:** `aidlc update`, or `install.sh --version 2.8.1` / `install.ps1 -Version 2.8.1`. Copilot and Cursor projects configured by 2.8.0 work as soon as the binary is updated: their existing `aidlc engine hook <harness>-adapter ...` wiring is accepted, and the 2.8.0 Copilot adapter still installed in the project (whose core-hook calls are the bare `aidlc hook <name>`) is accepted too. `aidlc config` in the project then rewrites the wiring to the canonical `aidlc engine adapter <harness> ...` spelling and installs the current adapter — Cursor's merged `.cursor/hooks.json` collapses every earlier AI-DLC spelling of an entry (bun-era and 2.8.0) into the one shipped entry instead of leaving duplicates that keep executing, and Copilot's `.github/hooks/aidlc.json` is regenerated.
