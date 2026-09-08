@@ -3619,7 +3619,7 @@ interface SessionPidEntry {
   startTime: string | null;
 }
 
-interface ProcessIdentity {
+export interface ProcessIdentity {
   ppid: number;
   startTime: string | null;
 }
@@ -3734,6 +3734,7 @@ export function writeSessionPidEntry(
   pid: number,
   sessionId: string,
   deadlineMs: number = Date.now() + SESSION_ANCESTRY_BUDGET_MS,
+  identity: ProcessIdentity | null | undefined = undefined,
 ): void {
   sessionAncestryCache.delete(projectDir);
   const path = sessionPidEntryPath(projectDir, pid);
@@ -3745,12 +3746,13 @@ export function writeSessionPidEntry(
   ) {
     return;
   }
-  const identity = processIdentity(pid, deadlineMs);
+  const resolvedIdentity =
+    identity === undefined ? processIdentity(pid, deadlineMs) : identity;
   try {
     mkdirSync(sessionPidMapDir(projectDir), { recursive: true });
     const entry: SessionPidEntry = {
       sessionId,
-      startTime: identity?.startTime ?? null,
+      startTime: resolvedIdentity?.startTime ?? null,
     };
     writeFileSync(path, `${JSON.stringify(entry)}\n`, "utf-8");
   } catch {
@@ -3758,7 +3760,11 @@ export function writeSessionPidEntry(
   }
 }
 
-function gcSessionPidEntries(projectDir: string, deadlineMs: number): void {
+function gcSessionPidEntries(
+  projectDir: string,
+  deadlineMs: number,
+  skip: ReadonlySet<number> = new Set(),
+): void {
   let names: string[];
   try {
     names = readdirSync(sessionPidMapDir(projectDir));
@@ -3766,17 +3772,21 @@ function gcSessionPidEntries(projectDir: string, deadlineMs: number): void {
     return;
   }
   for (const name of names) {
-    if (Date.now() >= deadlineMs || !/^\d+$/.test(name)) continue;
+    if (!/^\d+$/.test(name)) continue;
+    if (Date.now() >= deadlineMs) break;
     const pid = Number.parseInt(name, 10);
+    if (skip.has(pid)) continue;
     const entry = readSessionPidEntry(projectDir, pid);
-    const identity = processIdentity(pid, deadlineMs);
-    const stale =
-      !entry ||
-      !processIsAlive(pid) ||
-      (entry.startTime !== null &&
-        (identity?.startTime === null ||
-          identity?.startTime === undefined ||
-          identity.startTime !== entry.startTime));
+    let stale: boolean;
+    if (!entry || !processIsAlive(pid)) {
+      stale = true;
+    } else if (entry.startTime !== null) {
+      const identity = processIdentity(pid, deadlineMs);
+      if (identity === null) continue;
+      stale = identity.startTime !== entry.startTime;
+    } else {
+      stale = false;
+    }
     if (!stale) continue;
     try {
       unlinkSync(join(sessionPidMapDir(projectDir), name));
@@ -3793,7 +3803,6 @@ export function writeSessionPidAncestry(projectDir: string, sessionId: string): 
   sessionAncestryCache.delete(projectDir);
   if (validSessionId(sessionId) === null || sessionProcessPlatform() === "win32") return;
   const deadline = Date.now() + SESSION_ANCESTRY_BUDGET_MS;
-  gcSessionPidEntries(projectDir, deadline);
   const seen = new Set<number>();
   let pid = process.ppid;
   for (let depth = 0; depth < SESSION_ANCESTRY_MAX_DEPTH; depth++) {
@@ -3801,9 +3810,13 @@ export function writeSessionPidAncestry(projectDir: string, sessionId: string): 
     seen.add(pid);
     const identity = processIdentity(pid, deadline);
     if (!identity) break;
-    writeSessionPidEntry(projectDir, pid, sessionId, deadline);
+    writeSessionPidEntry(projectDir, pid, sessionId, deadline, identity);
     pid = identity.ppid;
   }
+  // GC is best-effort hygiene: dead pids are reaped without spawning, a live
+  // process whose identity cannot be read within the budget is left alone, and
+  // entries written by this ancestry walk are never re-examined.
+  gcSessionPidEntries(projectDir, deadline, seen);
 }
 
 // Resolve the nearest mapped ancestor of the calling process. Every failure is

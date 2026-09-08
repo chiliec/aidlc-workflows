@@ -3,9 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [2.8.2] - 2026-09-09
 
-Improve source-manifest validation performance for units with large source-claim sets while preserving the existing accept/refuse rules. **Upgrade:** `aidlc update`, or use `install.sh --version 2.8.2` / `install.ps1 -Version 2.8.2`.
+Improve source-manifest validation performance for units with large source-claim sets and make SessionStart ancestry binding reliable within its bounded macOS process-inspection budget. **Upgrade:** `aidlc update`, or use `install.sh --version 2.8.2` / `install.ps1 -Version 2.8.2`.
 
 * **Reviewing or finalizing a unit with hundreds of source claims is no longer minutes of git spawns.** `source-manifest.json` validation ran three `git` processes per claimed path (HEAD lookup, tree membership, ignore check); it now resolves HEAD once, reads the tree once, and checks ignore rules for every claim in one batched `git check-ignore`, with identical accept/refuse results.
+* **A new session's SessionStart maps its own harness process before cleaning up stale entries.** The hook used to spend its 50 ms ancestry budget re-checking the previous session's process entries before writing the new one, so on macOS a second session in the same project could stay bound to the first session's intent; it now writes the current ancestry first (resolving each ancestor's `ps` identity once) and reaps stale entries with the remaining budget — without deleting a live process's entry it could not verify in time (dead entries are reaped without spawning `ps`).
 
 ## [2.8.1] - 2026-09-08
 
